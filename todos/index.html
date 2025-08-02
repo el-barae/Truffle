@@ -374,39 +374,71 @@
         ];
 
         // Adresse de votre contrat (à remplacer par la vraie adresse après déploiement)
-        const contractAddress = "0x12718C4bAfA460f5bCc485c6EA6c258e3E7ec46d";
+        const contractAddress = "0x53b7C5ED9Ee558610972331B96dB09F7a7E754Ad"; // REMPLACEZ PAR VOTRE ADRESSE !
 
         // Initialisation
         async function init() {
-            if (typeof window.ethereum !== 'undefined') {
-                try {
-                    // Initialiser Web3
-                    web3 = new Web3(window.ethereum || 'http://localhost:7545');
-                    
-                    // Pour Ganache local, pas besoin de demander la connexion
-                    if (window.ethereum) {
-                        const accounts = await web3.eth.getAccounts();
-                        userAccount = accounts[0];
-                    } else {
-                        // Connexion directe à Ganache
-                        const accounts = await web3.eth.getAccounts();
-                        userAccount = accounts[0];
-                    }
-
-                    // Initialiser le contrat
-                    todoContract = new web3.eth.Contract(contractABI, contractAddress);
-                    
-                    updateStatus(`Connecté: ${userAccount.substring(0, 6)}...${userAccount.substring(38)}`, false);
-                    
-                    // Charger les tâches
-                    await loadTasks();
-                    
-                } catch (error) {
-                    console.error('Erreur d\'initialisation:', error);
-                    updateStatus('Erreur de connexion à la blockchain', true);
+            console.log('🚀 Initialisation de la DApp...');
+            
+            try {
+                // Vérifier si nous sommes dans un environnement avec Web3
+                if (typeof window.ethereum !== 'undefined') {
+                    web3 = new Web3(window.ethereum);
+                    console.log('📱 Web3 détecté via MetaMask/Ethereum provider');
+                } else {
+                    // Connexion directe à Ganache
+                    web3 = new Web3('http://localhost:7545');
+                    console.log('🔗 Connexion directe à Ganache');
                 }
-            } else {
-                updateStatus('Web3 non détecté. Utilisez Ganache ou MetaMask.', true);
+
+                // Tester la connexion
+                const networkId = await web3.eth.net.getId();
+                console.log('🌐 Network ID:', networkId);
+
+                // Obtenir les comptes
+                const accounts = await web3.eth.getAccounts();
+                console.log('👥 Comptes disponibles:', accounts);
+                
+                if (accounts.length === 0) {
+                    throw new Error('Aucun compte disponible');
+                }
+                
+                userAccount = accounts[0];
+                console.log('👤 Compte utilisé:', userAccount);
+
+                // Vérifier que l'adresse du contrat est valide
+                if (!web3.utils.isAddress(contractAddress)) {
+                    throw new Error('Adresse de contrat invalide: ' + contractAddress);
+                }
+
+                // Initialiser le contrat
+                console.log('📄 Initialisation du contrat à l\'adresse:', contractAddress);
+                todoContract = new web3.eth.Contract(contractABI, contractAddress);
+                console.log('✅ Contrat initialisé:', todoContract);
+
+                // Tester une méthode simple du contrat
+                const taskCount = await todoContract.methods.taskCount().call();
+                console.log('📊 Nombre de tâches:', taskCount);
+                
+                updateStatus(`Connecté: ${userAccount.substring(0, 6)}...${userAccount.substring(38)} | Tâches: ${taskCount}`, false);
+                
+                // Charger les tâches
+                await loadTasks();
+                
+            } catch (error) {
+                console.error('❌ Erreur d\'initialisation:', error);
+                updateStatus(`Erreur: ${error.message}`, true);
+                
+                // Suggestions de dépannage
+                if (error.message.includes('compte')) {
+                    updateStatus('Erreur: Aucun compte disponible. Vérifiez Ganache.', true);
+                } else if (error.message.includes('adresse')) {
+                    updateStatus('Erreur: Adresse de contrat invalide. Vérifiez le déploiement.', true);
+                } else if (error.message.includes('network')) {
+                    updateStatus('Erreur: Impossible de se connecter au réseau. Vérifiez Ganache.', true);
+                } else {
+                    updateStatus(`Erreur de connexion: ${error.message}`, true);
+                }
             }
         }
 
@@ -423,28 +455,64 @@
             const taskInput = document.getElementById('taskInput');
             const taskContent = taskInput.value.trim();
             
+            console.log('🎯 Tentative de création de tâche:', taskContent);
+            
             if (!taskContent) {
                 alert('Veuillez entrer une tâche !');
                 return;
             }
 
+            // Vérifications de sécurité
+            if (!todoContract) {
+                console.error('❌ Contrat non initialisé');
+                updateStatus('Erreur: Contrat non initialisé. Rechargez la page.', true);
+                return;
+            }
+
+            if (!userAccount) {
+                console.error('❌ Aucun compte utilisateur');
+                updateStatus('Erreur: Aucun compte connecté.', true);
+                return;
+            }
+
             try {
-                updateStatus('Création de la tâche en cours...', false);
+                updateStatus('⏳ Création de la tâche en cours...', false);
+                console.log('📝 Envoi de la transaction...');
+                
+                // Estimer le gas nécessaire d'abord
+                const gasEstimate = await todoContract.methods.createTask(taskContent).estimateGas({
+                    from: userAccount
+                });
+                console.log('⛽ Gas estimé:', gasEstimate);
                 
                 const result = await todoContract.methods.createTask(taskContent).send({
                     from: userAccount,
-                    gas: 300000
+                    gas: Math.floor(gasEstimate * 1.2) // Ajouter 20% de marge
                 });
                 
-                console.log('Tâche créée, hash:', result.transactionHash);
-                taskInput.value = '';
+                console.log('✅ Tâche créée avec succès!');
+                console.log('📄 Hash de transaction:', result.transactionHash);
+                console.log('📊 Gas utilisé:', result.gasUsed);
                 
-                updateStatus('Tâche créée avec succès !', false);
-                setTimeout(() => loadTasks(), 1000);
+                taskInput.value = '';
+                updateStatus('✅ Tâche créée avec succès !', false);
+                
+                // Recharger les tâches après un court délai
+                setTimeout(() => loadTasks(), 1500);
                 
             } catch (error) {
-                console.error('Erreur lors de la création:', error);
-                updateStatus('Erreur lors de la création de la tâche', true);
+                console.error('❌ Erreur lors de la création:', error);
+                
+                // Messages d'erreur plus spécifiques
+                if (error.message.includes('revert')) {
+                    updateStatus('Erreur: Transaction rejetée par le contrat', true);
+                } else if (error.message.includes('gas')) {
+                    updateStatus('Erreur: Pas assez de gas pour la transaction', true);
+                } else if (error.message.includes('insufficient funds')) {
+                    updateStatus('Erreur: Fonds insuffisants', true);
+                } else {
+                    updateStatus(`Erreur: ${error.message}`, true);
+                }
             }
         }
 
